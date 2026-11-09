@@ -11,6 +11,10 @@ namespace Feverfew.Collectors
     {
         private const int Days = 30;
         private const int MaxEvents = 30000;
+        private const int MaxShutdownRows = 40;
+        private const int RepeatedCrashDays = 180;
+        private const int NoisyDriverErrors = 100;
+        private const int MaxNoisyDrivers = 3;
 
         private sealed class Group
         {
@@ -25,7 +29,8 @@ namespace Feverfew.Collectors
 
         private static string Describe(EventRecord e)
         {
-            try { return Fmt.Clip(e.FormatDescription(), 260); }
+            // Windows puts invisible direction marks around the dates in some messages.
+            try { return Fmt.Clip((e.FormatDescription() ?? "").Replace("\u200e", "").Replace("\u200f", ""), 260); }
             catch (Exception) { return ""; }
         }
 
@@ -61,8 +66,15 @@ namespace Feverfew.Collectors
 
             Guard.Try(s, "System log", () =>
             {
-                var sys = Scan("System");
+                var shutdowns = new List<string[]>();
+                var sys = Scan("System", e => RecordShutdown(e, shutdowns));
                 Fill(s.Table("Most frequent System errors", "Count", "Last seen", "Source", "ID", "Message"), sys);
+                if (shutdowns.Count > 0)
+                {
+                    var t = s.Table("Unexpected shutdowns and blue screens", "Logged", "Event", "Details");
+                    t.Rows.AddRange(shutdowns);
+                    s.Note("Windows logs these when the PC starts again, so the crash itself came earlier. An 'improper shutdown' message gives Windows' last recorded time before the stop.");
+                }
                 Analyze(r, s, sys);
             });
 
@@ -88,6 +100,28 @@ namespace Feverfew.Collectors
             });
 
             Guard.Try(s, "Crash dumps", () => Dumps(r, s));
+        }
+
+        private static void RecordShutdown(EventRecord e, List<string[]> rows)
+        {
+            if (rows.Count >= MaxShutdownRows) return;
+            if (e.ProviderName == "Microsoft-Windows-Kernel-Power" && e.Id == 41)
+                rows.Add(new[] { Fmt.Seconds(e.TimeCreated), "Unexpected restart", UnexpectedRestartDetail(e) });
+            else if (e.ProviderName == "EventLog" && e.Id == 6008)
+                rows.Add(new[] { Fmt.Seconds(e.TimeCreated), "Improper shutdown", Describe(e) });
+            else if ((e.ProviderName == "Microsoft-Windows-WER-SystemErrorReporting" || e.ProviderName == "BugCheck") && e.Id == 1001)
+                rows.Add(new[] { Fmt.Seconds(e.TimeCreated), "Blue screen", Describe(e) });
+        }
+
+        private static string UnexpectedRestartDetail(EventRecord e)
+        {
+            try
+            {
+                var code = e.Properties.Count > 0 ? Convert.ToUInt32(e.Properties[0].Value) : 0;
+                if (code != 0) return "Stop code " + FormatCode(code) + " (" + BugCheckName(code) + ").";
+            }
+            catch (Exception) { }
+            return "No stop code recorded, so this may be power loss, a freeze or a forced restart.";
         }
 
         private static string FormatCode(object v)
@@ -129,6 +163,7 @@ namespace Feverfew.Collectors
 
             if (bugcheck > 0)
                 r.Find(bugcheck >= 3 ? Severity.Critical : Severity.Warning, bugcheck + " blue screen" + (bugcheck == 1 ? "" : "s") + " in " + Days + " days", "Windows recorded stop errors.", "Check 'Recent crash dumps' for the stop codes. Repeated different codes usually point to RAM, power or overclocking; a repeated single code usually points to a driver.");
+            NoisyDrivers(r, sys);
             if (kernelPower > bugcheck)
                 r.Find(kernelPower >= 3 ? Severity.Critical : Severity.Warning, kernelPower + " unexpected restart" + (kernelPower == 1 ? "" : "s"), "The PC stopped without shutting down cleanly, and some of those restarts had no blue screen.", "Suspect the power supply, overheating, unstable overclocks, or someone holding the power button.");
             if (wheaError > 0)
@@ -147,20 +182,59 @@ namespace Feverfew.Collectors
                 r.Find(Severity.Warning, "CPU speed is being limited by firmware", throttle + " throttling events. Usually heat or a weak power adapter.", "Clean the cooler and check the charger or power supply.");
         }
 
+        private static void NoisyDrivers(Report r, List<Group> sys)
+        {
+            var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "disk", "stornvme", "storahci" };
+            var noisy = sys.Where(g => g.Level <= 2 && !covered.Contains(g.Provider))
+                .GroupBy(g => g.Provider, StringComparer.OrdinalIgnoreCase)
+                .Select(p => new { Provider = p.Key, Count = p.Sum(g => g.Count), Example = p.OrderByDescending(g => g.Count).First().Message })
+                .Where(p => p.Count >= NoisyDriverErrors && IsDriver(p.Provider))
+                .OrderByDescending(p => p.Count)
+                .Take(MaxNoisyDrivers);
+            foreach (var d in noisy)
+                r.Find(Severity.Warning, "A driver keeps logging errors: " + d.Provider, d.Count + " errors in the last " + Days + " days. Most common: " + Fmt.Clip(d.Example, 140),
+                    "Update or reinstall that device's driver from its maker's site. Errors like this can go along with dropouts or blue screens, but they don't prove the driver caused them.");
+        }
+
+        private static bool IsDriver(string provider)
+        {
+            const int kernelDriver = 1, fileSystemDriver = 2;
+            var type = Reg.Machine(@"SYSTEM\CurrentControlSet\Services\" + provider, "Type");
+            if (type is int && ((int)type == kernelDriver || (int)type == fileSystemDriver)) return true;
+            var file = Reg.Machine(@"SYSTEM\CurrentControlSet\Services\EventLog\System\" + provider, "EventMessageFile") as string;
+            return file != null && file.IndexOf(".sys", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static void RepeatedCrashes(Report r, List<KeyValuePair<DateTime, uint>> dumps)
+        {
+            var cutoff = DateTime.Now.AddDays(-RepeatedCrashDays);
+            var worst = dumps.Where(d => d.Key >= cutoff).GroupBy(d => d.Value).OrderByDescending(g => g.Count()).FirstOrDefault();
+            if (worst == null || worst.Count() < 2) return;
+            r.Find(Severity.Warning, "The same blue screen keeps happening: " + BugCheckName(worst.Key),
+                worst.Count() + " saved crash dumps since " + Fmt.Date(worst.Min(d => d.Key)) + " have stop code 0x" + worst.Key.ToString("X8", CultureInfo.InvariantCulture) + ". The times are in 'Recent crash dumps'.",
+                worst.Key == 0x9F
+                    ? "This code means a device driver stalled a sleep, shutdown or power change. Update the Wi-Fi, Bluetooth, chipset and graphics drivers, and try turning off Fast Startup. Opening a dump in Microsoft's WinDbg names the driver."
+                    : "One repeated code usually points to a driver. Opening a dump in Microsoft's WinDbg names it.");
+        }
+
         private static void Dumps(Report r, Section s)
         {
             // Without admin rights the folder just looks absent, which would read as "no crashes".
             if (!Scanner.IsElevated()) throw new UnauthorizedAccessException();
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Minidump");
             var t = s.Table("Recent crash dumps", "Date", "File", "Size", "Stop code", "Meaning");
+            var found = new List<KeyValuePair<DateTime, uint>>();
             if (Directory.Exists(dir))
             {
                 foreach (var f in new DirectoryInfo(dir).GetFiles("*.dmp").OrderByDescending(f => f.LastWriteTime).Take(15))
                 {
                     var code = ReadBugCheck(f.FullName);
-                    t.Rows.Add(new[] { Fmt.Time(f.LastWriteTime), f.Name, Fmt.Bytes(f.Length), code == null ? "Unreadable" : "0x" + code.Value.ToString("X8"), code == null ? "" : BugCheckName(code.Value) });
+                    if (code != null) found.Add(new KeyValuePair<DateTime, uint>(f.LastWriteTime, code.Value));
+                    t.Rows.Add(new[] { Fmt.Seconds(f.LastWriteTime), f.Name, Fmt.Bytes(f.Length), code == null ? "Unreadable" : "0x" + code.Value.ToString("X8"), code == null ? "" : BugCheckName(code.Value) });
                 }
             }
+            RepeatedCrashes(r, found);
+            if (t.Rows.Count > 0) s.Note("A crash dump's time is when Windows finished saving it, usually during the restart after the crash.");
             var full = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "MEMORY.DMP");
             if (File.Exists(full))
             {

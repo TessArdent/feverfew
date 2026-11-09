@@ -58,9 +58,11 @@ namespace Feverfew.Collectors
                 foreach (var m in sticks)
                 {
                     total += m.Long("Capacity") ?? 0;
+                    var rated = RatedSpeed(m);
+                    bool fromPart = rated > (m.Long("Speed") ?? 0);
                     t.Rows.Add(new[]
                     {
-                        m.Str("DeviceLocator"), Fmt.Bytes(m.Long("Capacity")), m.Str("Speed") + " MT/s", m.Str("ConfiguredClockSpeed") + " MT/s",
+                        m.Str("DeviceLocator"), Fmt.Bytes(m.Long("Capacity")), rated + " MT/s" + (fromPart ? " (from part number)" : ""), m.Str("ConfiguredClockSpeed") + " MT/s",
                         m.Str("Manufacturer"), m.Str("PartNumber"), r.Private(m.Str("SerialNumber"))
                     });
                 }
@@ -79,12 +81,34 @@ namespace Feverfew.Collectors
                     r.Find(Severity.Info, "Mixed memory modules", "The installed RAM sticks aren't an identical set.",
                         "Mixed kits usually work, but they're a common cause of random crashes when memory runs at higher speeds.");
 
-                var slow = sticks.Where(m => m.Long("Speed") > 0 && m.Long("ConfiguredClockSpeed") > 0 && m.Long("ConfiguredClockSpeed") < m.Long("Speed") * 0.9).ToList();
+                var slow = sticks.Where(m => RatedSpeed(m) > 0 && m.Long("ConfiguredClockSpeed") > 0 && m.Long("ConfiguredClockSpeed") < RatedSpeed(m) * 0.9).ToList();
                 if (slow.Count > 0)
                     r.Find(Severity.Info, "Memory is running below its rated speed",
-                        "Rated " + slow[0].Str("Speed") + " MT/s, running at " + slow[0].Str("ConfiguredClockSpeed") + " MT/s.",
-                        "This is normal unless XMP/EXPO is meant to be on in BIOS setup. If the PC crashes with XMP on, leave it off.");
+                        "Rated " + RatedSpeed(slow[0]) + " MT/s, running at " + slow[0].Str("ConfiguredClockSpeed") + " MT/s.",
+                        "In BIOS setup, turn on the memory profile (XMP, EXPO, or D.O.C.P. on ASUS) and leave the other settings on Auto. It can help performance in games. Test with MemTest86 afterwards, and if the PC crashes with it on, turn it back off.");
             });
+        }
+
+        // Without XMP or EXPO on, Windows often reports the fallback speed as the rating.
+        private static long RatedSpeed(Row stick)
+        {
+            return Math.Max(stick.Long("Speed") ?? 0, RatedFromPartNumber(stick.Str("PartNumber")) ?? 0);
+        }
+
+        /// <summary>Reads the speed out of part numbers like KHX3200C16D4/8GX, CMK16GX4M2B3200C16 or HX432C16FB3/8.</summary>
+        private static long? RatedFromPartNumber(string part)
+        {
+            const System.Text.RegularExpressions.RegexOptions ignore = System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+            var full = System.Text.RegularExpressions.Regex.Match(part ?? "", @"(?<!\d)([2-8]\d{3})CL?\d{2}(?!\d)", ignore);
+            if (full.Success) return long.Parse(full.Groups[1].Value);
+            var hyperX = System.Text.RegularExpressions.Regex.Match(part ?? "", @"^K?HX4(\d{2})[CS]\d{2}", ignore);
+            if (!hyperX.Success) return null;
+            switch (hyperX.Groups[1].Value)
+            {
+                case "26": return 2666;
+                case "29": return 2933;
+                default: return long.Parse(hyperX.Groups[1].Value) * 100;
+            }
         }
 
         public static void Graphics(Report r)

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.Eventing.Reader;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -19,6 +21,23 @@ namespace Feverfew.Collectors
         private const string WindowsLoader = @"\EFI\MICROSOFT\BOOT\BOOTMGFW.EFI";
         private static readonly Guid X509Type = new Guid("a5c059a1-94e4-4aa7-87b5-ab155c2bf072");
         private const int MaxLoaders = 40;
+        private const int MaxUpdateEvents = 2000;
+        private const string SecureBootKey = @"SYSTEM\CurrentControlSet\Control\Secureboot";
+        private const string Windows2023 = "Windows UEFI CA 2023";
+        private const string Kek2023 = "KEK 2K CA 2023";
+        private const string UpdateEventProvider = "Microsoft-Windows-TPM-WMI";
+
+        private static readonly Dictionary<int, string> UpdateEvents = new Dictionary<int, string>
+        {
+            { 1032, "Stopped before writing to firmware, because BitLocker would have asked for its recovery key" },
+            { 1036, "Added a Windows certificate to db" }, { 1043, "Updated KEK" },
+            { 1044, "Added Microsoft Option ROM UEFI CA 2023 to db" }, { 1045, "Added Microsoft UEFI CA 2023 to db" },
+            { 1795, "The firmware returned an error during a write" }, { 1796, "The update hit an error and will retry" },
+            { 1797, "The new boot manager couldn't be installed" }, { 1799, "Installed the boot manager signed by Windows UEFI CA 2023" },
+            { 1800, "A restart is needed before the next step" }, { 1801, "Certificates are not yet applied to firmware" },
+            { 1802, "The update was deliberately blocked on this PC" }, { 1803, "The PC maker hasn't provided a signed KEK for this PC" },
+            { 1808, "The Secure Boot certificate update is complete" }
+        };
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern uint GetFirmwareEnvironmentVariableW(string name, string guid, byte[] buffer, uint size);
@@ -41,6 +60,17 @@ namespace Feverfew.Collectors
         [StructLayout(LayoutKind.Sequential, Pack = 4)]
         private struct TokenPrivilege { public uint Count; public long Luid; public uint Attributes; }
 
+        /// <summary>What the separate boot checks learn, so the final advice can use all of it.</summary>
+        private sealed class BootState
+        {
+            public bool SecureBootOn;
+            public bool KeysUsable;
+            public bool Has2023;
+            public SignatureSet Db;
+            public SignatureSet DefaultDb;
+            public string WindowsLoaderIssuer;
+        }
+
         private sealed class SignatureSet
         {
             public readonly List<X509Certificate2> Certificates = new List<X509Certificate2>();
@@ -58,9 +88,12 @@ namespace Feverfew.Collectors
                 return;
             }
 
-            Guard.Try(s, "Secure Boot keys", () => { EnablePrivilege(); Keys(r, s); });
+            var state = new BootState();
+            Guard.Try(s, "Secure Boot keys", () => { EnablePrivilege(); Keys(r, s, state); });
             Guard.Try(s, "Firmware boot entries", () => { EnablePrivilege(); Entries(r, s); });
-            Guard.Try(s, "EFI boot loaders", () => Loaders(r, s));
+            Guard.Try(s, "EFI boot loaders", () => Loaders(r, s, state));
+            CheckWindowsLoaderTrust(r, state);
+            Guard.Try(s, "Secure Boot certificate update", () => CertificateUpdate(r, s, state));
         }
 
         private static void EnablePrivilege()
@@ -128,7 +161,28 @@ namespace Feverfew.Collectors
 
         private static string CommonName(X509Certificate2 c) { return c.GetNameInfo(X509NameType.SimpleName, false); }
 
-        private static void Keys(Report r, Section s)
+        private static bool Contains(SignatureSet set, string name)
+        {
+            return set != null && set.Certificates.Any(c => CommonName(c).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        /// <summary>Reads one of the BIOS's built-in key lists. Null means this firmware doesn't expose it.</summary>
+        private static SignatureSet DefaultKeys(string name)
+        {
+            try
+            {
+                var data = Variable(name, GlobalGuid);
+                return data == null ? null : ParseSignatures(data);
+            }
+            catch (Win32Exception) { return null; }
+        }
+
+        private static string DefaultsState(SignatureSet set, string name)
+        {
+            return set == null ? "Couldn't be read" : Contains(set, name) ? "Yes" : "No";
+        }
+
+        private static void Keys(Report r, Section s, BootState state)
         {
             var setup = Variable("SetupMode", GlobalGuid);
             bool setupMode = setup != null && setup.Length > 0 && setup[0] == 1;
@@ -136,21 +190,28 @@ namespace Feverfew.Collectors
             var kek = ParseSignatures(Variable("KEK", GlobalGuid));
             var db = ParseSignatures(Variable("db", SecurityGuid));
             var dbx = ParseSignatures(Variable("dbx", SecurityGuid));
+            var enforced = Variable("SecureBoot", GlobalGuid);
+            var defaultKek = DefaultKeys("KEKDefault");
+            state.SecureBootOn = enforced != null && enforced.Length > 0 && enforced[0] == 1;
+            state.Db = db;
+            state.DefaultDb = DefaultKeys("dbDefault");
 
             s.Add("Setup Mode", setupMode ? "Yes (keys can be changed; Secure Boot isn't enforced)" : "No");
             s.Add("Platform key (PK)", pk.Total > 0 ? "Installed" : "Missing");
             s.Add("Key exchange keys (KEK)", kek.Total);
             s.Add("Allowed signatures (db)", db.Total);
             s.Add("Revoked signatures (dbx)", dbx.Total);
+            s.Add("BIOS default db has " + Windows2023, DefaultsState(state.DefaultDb, Windows2023));
+            s.Add("BIOS default KEK has a 2023 Microsoft key", DefaultsState(defaultKek, Kek2023));
 
             var t = s.Table("Trusted Secure Boot certificates", "Store", "Certificate", "Expires");
-            foreach (var pair in new[] { Tuple.Create("PK", pk), Tuple.Create("KEK", kek), Tuple.Create("db", db) })
+            foreach (var pair in new[] { Tuple.Create("PK", pk), Tuple.Create("KEK", kek), Tuple.Create("db", db), Tuple.Create("KEK (BIOS default)", defaultKek ?? new SignatureSet()), Tuple.Create("db (BIOS default)", state.DefaultDb ?? new SignatureSet()) })
                 foreach (var c in pair.Item2.Certificates)
                     t.Rows.Add(new[] { pair.Item1, CommonName(c), Fmt.Date(c.NotAfter) });
 
-            Func<string, bool> trusted = name => db.Certificates.Any(c => CommonName(c).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
-            bool has2011 = trusted("Windows Production PCA 2011");
-            bool has2023 = trusted("Windows UEFI CA 2023");
+            bool has2011 = Contains(db, "Windows Production PCA 2011");
+            bool has2023 = Contains(db, Windows2023);
+            state.Has2023 = has2023;
 
             if (setupMode || pk.Total == 0 || db.Total == 0)
                 r.Find(Severity.Warning, "Secure Boot keys are missing", "The firmware has no complete set of keys, which is common after a BIOS update. Secure Boot can't verify Windows like this.",
@@ -158,9 +219,72 @@ namespace Feverfew.Collectors
             else if (!has2011 && !has2023)
                 r.Find(Severity.Warning, "Firmware doesn't trust Windows boot files", "The allowed list (db) has neither Microsoft Windows boot certificate, so Secure Boot would reject Windows.",
                     "In BIOS setup, reinstall the default Secure Boot keys. If they're still absent, update the BIOS.");
-            else if (!has2023)
+            else
+                state.KeysUsable = true;
+        }
+
+        private static void CheckWindowsLoaderTrust(Report r, BootState state)
+        {
+            if (!state.KeysUsable) return;
+            var issuer = state.WindowsLoaderIssuer;
+            if (!state.SecureBootOn && !string.IsNullOrEmpty(issuer) && !Contains(state.Db, issuer))
+            {
+                bool? inDefaults = state.DefaultDb == null ? (bool?)null : Contains(state.DefaultDb, issuer);
+                r.Find(Severity.Warning, "Secure Boot would reject Windows' boot file",
+                    "bootmgfw.efi is signed by " + issuer + ", which isn't in the firmware's allowed list (db). Turning Secure Boot on would fail with an 'Invalid signature' error, and Windows can't add the certificate itself while Secure Boot is off.",
+                    RejectionAdvice(issuer, inDefaults));
+            }
+            else if (!state.Has2023)
                 r.Find(Severity.Info, "Newer Microsoft boot certificate isn't installed", "The firmware doesn't list Windows UEFI CA 2023, which Microsoft is moving Windows boot files to.",
                     "Install all Windows updates and the latest BIOS.");
+        }
+
+        private static string RejectionAdvice(string issuer, bool? inDefaults)
+        {
+            const string recovery = "boot Microsoft's SecureBootRecovery.efi from a FAT32 USB drive, as described in Microsoft's Secure Boot troubleshooting guide. It adds Windows UEFI CA 2023 to db.";
+            if (inDefaults == true)
+                return "The BIOS's default keys include " + issuer + ". In BIOS setup, open Boot > Secure Boot > Key Management, install the default keys, then set OS Type to Windows UEFI mode. Don't only clear the keys.";
+            if (inDefaults == false)
+                return "Installing the default keys won't help, because they don't include " + issuer + ". Update the BIOS if a newer version exists. Otherwise, " + recovery;
+            return "Feverfew couldn't read the BIOS's default keys, so it can't tell whether installing them would help. Update the BIOS if a newer version exists. Otherwise, " + recovery;
+        }
+
+        private static void CertificateUpdate(Report r, Section s, BootState state)
+        {
+            var pending = Reg.Machine(SecureBootKey, "AvailableUpdates");
+            var status = Reg.Machine(SecureBootKey + @"\Servicing", "UEFICA2023Status");
+            var error = Reg.Machine(SecureBootKey + @"\Servicing", "UEFICA2023Error");
+            var errorEvent = Reg.Machine(SecureBootKey + @"\Servicing", "UEFICA2023ErrorEvent");
+
+            if (pending != null) s.Add("Certificate update queue (AvailableUpdates)", "0x" + unchecked((uint)Convert.ToInt32(pending)).ToString("X", CultureInfo.InvariantCulture));
+            if (status != null) s.Add("Certificate update status", status);
+            if (error != null) s.Add("Certificate update error", "0x" + unchecked((uint)Convert.ToInt32(error)).ToString("X", CultureInfo.InvariantCulture));
+            if (!state.SecureBootOn && state.Db != null) s.Note("Secure Boot is off, so Windows won't apply its Secure Boot certificate update.");
+
+            if (error != null && Convert.ToInt32(error) != 0)
+                r.Find(Severity.Warning, "Secure Boot certificate update reported an error",
+                    "Error 0x" + unchecked((uint)Convert.ToInt32(error)).ToString("X", CultureInfo.InvariantCulture) + (errorEvent != null ? ", event " + errorEvent : "") + ".",
+                    "Check 'Secure Boot certificate update events', and install the latest BIOS if the firmware refused a write.");
+
+            var filter = string.Join(" or ", UpdateEvents.Keys.Select(id => "EventID=" + id));
+            var query = new EventLogQuery("System", PathType.LogName, "*[System[Provider[@Name='" + UpdateEventProvider + "'] and (" + filter + ")]]") { ReverseDirection = true };
+            // The same event repeats at every startup, so a failure has to survive a long run of them.
+            var newest = new Dictionary<int, DateTime?>();
+            var counts = new Dictionary<int, int>();
+            using (var reader = new EventLogReader(query))
+            {
+                EventRecord e;
+                for (int n = 0; n < MaxUpdateEvents && (e = reader.ReadEvent()) != null; n++)
+                    using (e)
+                    {
+                        if (!newest.ContainsKey(e.Id)) { newest[e.Id] = e.TimeCreated; counts[e.Id] = 0; }
+                        counts[e.Id]++;
+                    }
+            }
+            if (newest.Count == 0) return;
+            var t = s.Table("Secure Boot certificate update events", "Last seen", "Count", "ID", "Meaning");
+            foreach (var kv in newest.OrderByDescending(x => x.Value))
+                t.Rows.Add(new[] { Fmt.Seconds(kv.Value), counts[kv.Key].ToString(CultureInfo.InvariantCulture), kv.Key.ToString(CultureInfo.InvariantCulture), UpdateEvents[kv.Key] });
         }
 
         private static string ReadUtf16(byte[] d, ref int p, int end)
@@ -207,10 +331,10 @@ namespace Feverfew.Collectors
             if (first != null) s.Add("First boot entry", first);
         }
 
-        private static void Loaders(Report r, Section s)
+        private static void Loaders(Report r, Section s, BootState state)
         {
             if (!Scanner.IsElevated()) throw new UnauthorizedAccessException();
-            var partitions = Wmi.Query(@"root\Microsoft\Windows\Storage", "SELECT DiskNumber, GptType, AccessPaths FROM MSFT_Partition")
+            var partitions = Wmi.Query(@"root\Microsoft\Windows\Storage", "SELECT DiskNumber, GptType, AccessPaths, IsSystem FROM MSFT_Partition")
                 .Where(p => p.Str("GptType").Trim('{', '}').Equals(EfiPartitionType, StringComparison.OrdinalIgnoreCase)).ToList();
 
             var t = s.Table("EFI boot loaders", "Disk", "File", "Size", "Date", "Signed by", "Certificate issuer");
@@ -237,7 +361,12 @@ namespace Feverfew.Collectors
                     }
                     catch (CryptographicException) { }
                     t.Rows.Add(new[] { p.Str("DiskNumber"), relative, Fmt.Bytes(info.Length), Fmt.Date(info.LastWriteTime), subject, issuer });
-                    if (relative.Equals(WindowsLoader, StringComparison.OrdinalIgnoreCase)) windowsFound = true;
+                    if (relative.Equals(WindowsLoader, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Another disk can hold an old copy, so the partition Windows started from wins.
+                        if (!windowsFound || p.Bool("IsSystem") == true) state.WindowsLoaderIssuer = issuer;
+                        windowsFound = true;
+                    }
                 }
             }
             if (!windowsFound)
