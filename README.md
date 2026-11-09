@@ -10,7 +10,7 @@ Named after feverfew, a daisy-like flower long used as a home remedy.
 2. Open Feverfew and accept the Windows permission prompt, then press **Run diagnostics**. A scan takes under a minute.
 3. Press **Show file to send** and send that `.html` file to whoever is helping.
 
-Reports are saved in `Feverfew Reports` on the Desktop.
+Reports are saved in `Feverfew Reports` in your Documents folder.
 
 `setup.exe` isn't code-signed, so Windows SmartScreen may warn about it. Choose **More info**, then **Run anyway**. Each release lists the file's SHA-256 hash so you can check your download.
 

@@ -33,7 +33,7 @@ drive health counters and crash dumps.";
 
         public static string DefaultOutput()
         {
-            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Feverfew Reports");
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Feverfew Reports");
         }
 
         [STAThread]
@@ -107,7 +107,7 @@ drive health counters and crash dumps.";
         /// <summary>Restarts elevated. Returns false if the user declined the permission prompt.</summary>
         public static bool RelaunchElevated(ScanOptions options)
         {
-            // --out keeps the report on this user's Desktop even if a different admin account approves the prompt.
+            // --out keeps the report in this user's Documents even if a different admin account approves the prompt.
             var arguments = RelaunchedFlag + " --out \"" + options.OutputDirectory.TrimEnd('\\') + "\"";
             if (options.IncludeIdentifiers) arguments += " --include-identifiers";
             if (!options.NetworkTests) arguments += " --no-network";
