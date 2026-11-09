@@ -8,7 +8,7 @@
     <Nullable>disable</Nullable>
     <RootNamespace>Feverfew</RootNamespace>
     <AssemblyName>Feverfew</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Authors>TessArdent</Authors>
     <Company>TessArdent</Company>
     <Product>Feverfew</Product>

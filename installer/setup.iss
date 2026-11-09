@@ -1,7 +1,7 @@
 ; Builds dist\setup.exe. Run build.ps1 instead of calling this directly.
 
 #ifndef AppVersion
-  #define AppVersion "1.1.0"
+  #define AppVersion "1.1.1"
 #endif
 
 [Setup]
