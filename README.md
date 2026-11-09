@@ -28,6 +28,7 @@ Reports are saved in `Feverfew Reports` on the Desktop.
 | Software | Installed programs, startup programs, stopped services, top memory use |
 | Crashes | Blue screen stop codes, unexpected restarts, hardware (WHEA) errors, disk errors, program crashes, last 30 days of event log errors |
 | Network | Adapters, addresses, DNS, proxy, router, internet and name lookup tests |
+| Gaming | Power plan, Game Mode, background recording, GPU scheduling, memory integrity, connection type, latency, jitter and packet loss, TCP and network adapter settings, NVIDIA power, PCIe and Resizable BAR details, AMD driver details, refresh rate |
 | Battery | Charge, wear, cycles (laptops) |
 | Windows 11 | Readiness for each hardware requirement, except Microsoft's supported CPU list |
 
@@ -35,7 +36,7 @@ The report comes as an `.html` file to read and a `.json` file with the same con
 
 ## Privacy
 
-- **Nothing is uploaded.** Feverfew has no telemetry. A scan's only network traffic is the connection test: a ping to the router, a ping to `1.1.1.1`, and a name lookup for `www.microsoft.com`. Use `--no-network` to skip it. **Check for updates** contacts GitHub only when you press it, and sends no report data.
+- **Nothing is uploaded.** Feverfew has no telemetry. A scan's only network traffic is the connection tests: pings to the router and to `1.1.1.1` (about 20 each, to measure latency), and a name lookup for `www.microsoft.com`. Use `--no-network` to skip it. **Check for updates** contacts GitHub only when you press it, and sends no report data.
 - **Identifiers are hidden by default.** Serial numbers, the system UUID, computer and user names, drive labels, MAC addresses, public IP addresses, and email addresses in log messages become `[hidden]`. Tick the checkbox to keep them, for example for a warranty claim.
 - **Feverfew never reads** product keys, BitLocker recovery keys, passwords, browser data or personal files.
 - **Reports still say a lot about a PC.** The installed programs list, for one, is included even with identifiers hidden. Only send a report to someone you trust, and glance through it first if that matters to you.
@@ -54,6 +55,17 @@ The report comes as an `.html` file to read and a `.json` file with the same con
 | Clear the DNS cache | `ipconfig /flushdns` |
 | Reset network settings | `netsh winsock reset`, `netsh int ip reset` |
 | Reset Windows Update | Stops its services and renames its cache folders |
+
+## Gaming
+
+**Gaming** lists optional changes. Each one runs in its own administrator window, only when you press **Apply**, and most have an **Undo**. Feverfew leaves out popular tweaks with no reliable benefit, and doesn't offer to turn off security features such as memory integrity.
+
+| Option | Command |
+| --- | --- |
+| High performance power plan | `powercfg /setactive SCHEME_MIN` |
+| Game Mode, background recording, GPU scheduling | `reg add` on the matching Windows setting |
+| Restore default TCP settings | `netsh int tcp set global autotuninglevel=normal`, `rss=enabled`, `netsh int tcp set heuristics disabled` |
+| Restore default multimedia settings | `reg add` on `NetworkThrottlingIndex` and `SystemResponsiveness` |
 
 ## Updates
 

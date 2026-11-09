@@ -41,7 +41,8 @@ namespace Feverfew
             AccessDetail.Text = limited ? "Some checks will be skipped" : "Full scan available";
             LimitedBar.Visibility = limited ? Visibility.Visible : Visibility.Collapsed;
 
-            foreach (var fix in Fixes.All) RepairList.Children.Add(BuildFixRow(fix));
+            foreach (var fix in Fixes.All) RepairList.Children.Add(BuildFixRow(fix, RepairStatus, "Run"));
+            foreach (var fix in Fixes.Gaming) GamingList.Children.Add(BuildFixRow(fix, GamingStatus, "Apply"));
             SourceInitialized += (s, e) => ApplyBackdrop();
             StateChanged += (s, e) => Root.Margin = new Thickness(WindowState == WindowState.Maximized ? MaximizedInset : 0);
             Closed += (s, e) => Environment.Exit(0); // an abandoned scan step may still be running on a background thread
@@ -66,6 +67,7 @@ namespace Feverfew
             if (ScanPage == null) return; // fires during startup, before the pages exist
             ScanPage.Visibility = sender == NavScan ? Visibility.Visible : Visibility.Collapsed;
             RepairPage.Visibility = sender == NavRepair ? Visibility.Visible : Visibility.Collapsed;
+            GamingPage.Visibility = sender == NavGaming ? Visibility.Visible : Visibility.Collapsed;
             UpdatesPage.Visibility = sender == NavUpdates ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -165,26 +167,34 @@ namespace Feverfew
             return new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = grid };
         }
 
-        private Border BuildFixRow(Fix fix)
+        private Button BuildCommandButton(Fix fix, string command, string label, TextBlock status)
+        {
+            var button = new Button { Content = label, MinWidth = 72, Margin = new Thickness(8, 0, 0, 0) };
+            button.Click += async (s, e) =>
+            {
+                if (fix.Caution != null && !await Ask(fix.Name, fix.Caution, label)) return;
+                status.Text = Fixes.Run(command)
+                    ? "Started: " + fix.Name + ". Read the result in its window, then close it."
+                    : "Not started, because the Windows permission prompt was declined.";
+            };
+            return button;
+        }
+
+        private Border BuildFixRow(Fix fix, TextBlock status, string runLabel)
         {
             var text = new StackPanel { Margin = new Thickness(0, 0, 16, 0) };
             text.Children.Add(new TextBlock { Text = fix.Name, Style = (Style)FindResource("CardTitle") });
             text.Children.Add(new TextBlock { Text = fix.When, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 0) });
 
-            var run = new Button { Content = "Run", MinWidth = 72 };
-            run.Click += async (s, e) =>
-            {
-                if (fix.Caution != null && !await Ask(fix.Name, fix.Caution, "Run fix")) return;
-                RepairStatus.Text = Fixes.Run(fix)
-                    ? "Started: " + fix.Name + ". Read the result in its window, then close it."
-                    : "Not started, because the Windows permission prompt was declined.";
-            };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            if (fix.Undo != null) buttons.Children.Add(BuildCommandButton(fix, fix.Undo, "Undo", status));
+            buttons.Children.Add(BuildCommandButton(fix, fix.Command, runLabel, status));
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             AddToGrid(grid, text, 0, 0);
-            AddToGrid(grid, run, 0, 1);
+            AddToGrid(grid, buttons, 0, 1);
             return new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = grid };
         }
 

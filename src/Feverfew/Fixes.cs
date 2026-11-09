@@ -10,6 +10,8 @@ namespace Feverfew
         public string Command;
         /// <summary>Set when the fix needs a restart or changes settings; the app asks first and shows this text.</summary>
         public string Caution;
+        /// <summary>Command that reverses this one, for fixes that offer an Undo button.</summary>
+        public string Undo;
     }
 
     public static class Fixes
@@ -44,22 +46,50 @@ namespace Feverfew
                 Command = ResetWindowsUpdate, Caution = "Windows Update stops briefly, its cache is renamed, and the list of past updates may appear empty." }
         };
 
+        private const string GameBar = @"HKCU\Software\Microsoft\GameBar";
+        private const string GameDvr = @"HKCU\Software\Microsoft\Windows\CurrentVersion\GameDVR";
+        private const string GraphicsDrivers = @"HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
+        private const string SystemProfile = @"""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile""";
+        private const string GpuRestart = "You must restart for this to take effect.";
+
+        public static readonly Fix[] Gaming =
+        {
+            new Fix { Name = "Use the High performance power plan", When = "The CPU is slow to ramp up in games. Uses more power and makes laptops run hotter. Undo returns to Balanced.",
+                Command = "powercfg /setactive SCHEME_MIN", Undo = "powercfg /setactive SCHEME_BALANCED" },
+            new Fix { Name = "Turn on Game Mode", When = "The scan reports that Game Mode is off. Undo turns it off.",
+                Command = "reg add " + GameBar + " /v AutoGameModeEnabled /t REG_DWORD /d 1 /f & reg add " + GameBar + " /v AllowAutoGameMode /t REG_DWORD /d 1 /f",
+                Undo = "reg add " + GameBar + " /v AutoGameModeEnabled /t REG_DWORD /d 0 /f" },
+            new Fix { Name = "Turn off background recording", When = "You don't use Game Bar to save the last moments of play. Undo turns it back on.",
+                Command = "reg add " + GameDvr + " /v HistoricalCaptureEnabled /t REG_DWORD /d 0 /f",
+                Undo = "reg add " + GameDvr + " /v HistoricalCaptureEnabled /t REG_DWORD /d 1 /f" },
+            new Fix { Name = "Turn on hardware-accelerated GPU scheduling", When = "Needed for DLSS Frame Generation and helpful on some recent cards. Needs a supported card and driver. Undo turns it off.",
+                Command = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 2 /f", Undo = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 1 /f", Caution = GpuRestart },
+            new Fix { Name = "Restore default TCP settings", When = "The scan reports changed TCP settings, or a tweak tool has been used. Sets auto-tuning to normal, receive side scaling on and heuristics off.",
+                Command = "netsh int tcp set global autotuninglevel=normal & netsh int tcp set global rss=enabled & netsh int tcp set heuristics disabled" },
+            new Fix { Name = "Restore default multimedia settings", When = "The scan reports changed network throttling or system responsiveness values.",
+                Command = "reg add " + SystemProfile + " /v NetworkThrottlingIndex /t REG_DWORD /d 10 /f & reg add " + SystemProfile + " /v SystemResponsiveness /t REG_DWORD /d 20 /f" }
+        };
+
         public static void AddToReport(Report r)
         {
             var s = r.NewSection("Typical fixes");
             var t = s.Table("Commands to run from an administrator prompt", "Fix", "When to use it", "Command", "Caution");
             foreach (var f in All) t.Rows.Add(new[] { f.Name, f.When, f.Command, f.Caution ?? "" });
-            s.Note("Feverfew doesn't run any of these during a scan. To run one, open Repair tools in Feverfew.");
+            var g = s.Table("Gaming optimisations", "Optimisation", "When to use it", "Command", "Undo command", "Caution");
+            foreach (var f in Gaming) g.Rows.Add(new[] { f.Name, f.When, f.Command, f.Undo ?? "", f.Caution ?? "" });
+            s.Note("Feverfew doesn't run any of these during a scan. To run one, open Repair tools or Gaming in Feverfew.");
         }
 
         public static string ConsoleArguments(string command) { return "/k \"" + command + "\""; }
 
         /// <summary>Opens an administrator console that runs the fix and stays open. Returns false if the user declined the prompt.</summary>
-        public static bool Run(Fix fix)
+        public static bool Run(Fix fix) { return Run(fix.Command); }
+
+        public static bool Run(string command)
         {
             try
             {
-                Process.Start(new ProcessStartInfo("cmd.exe", ConsoleArguments(fix.Command)) { UseShellExecute = true, Verb = "runas" });
+                Process.Start(new ProcessStartInfo("cmd.exe", ConsoleArguments(command)) { UseShellExecute = true, Verb = "runas" });
                 return true;
             }
             catch (Win32Exception e) when (e.NativeErrorCode == 1223)

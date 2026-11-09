@@ -44,6 +44,7 @@
                 <StackPanel>
                     <RadioButton x:Name="NavScan" Style="{StaticResource NavItem}" Content="Diagnostics" Tag="&#xE9D9;" IsChecked="True" Checked="Nav_Checked" />
                     <RadioButton x:Name="NavRepair" Style="{StaticResource NavItem}" Content="Repair tools" Tag="&#xE90F;" Checked="Nav_Checked" />
+                    <RadioButton x:Name="NavGaming" Style="{StaticResource NavItem}" Content="Gaming" Tag="&#xE7FC;" Checked="Nav_Checked" />
                     <RadioButton x:Name="NavUpdates" Style="{StaticResource NavItem}" Content="Updates and about" Tag="&#xE895;" Checked="Nav_Checked" />
                 </StackPanel>
             </DockPanel>
@@ -114,6 +115,15 @@
                         <TextBlock Text="Repair tools" Style="{StaticResource PageTitle}" />
                         <TextBlock x:Name="RepairStatus" Text="Each fix opens in its own administrator window so you can watch it and read the result. Nothing runs until you press Run." Style="{StaticResource Secondary}" Margin="0,0,0,16" />
                         <StackPanel x:Name="RepairList" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="GamingPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                    <StackPanel Margin="28,12,32,32" MaxWidth="1000">
+                        <TextBlock Text="Gaming" Style="{StaticResource PageTitle}" />
+                        <TextBlock x:Name="GamingStatus" Text="Run diagnostics to see what's worth changing on this PC. Results vary by game and hardware. Each option opens in its own administrator window, and nothing runs until you press Apply." Style="{StaticResource Secondary}" Margin="0,0,0,8" />
+                        <TextBlock Text="Game Mode and recording apply to the account that approves the Windows permission prompt." Style="{StaticResource Caption}" Margin="0,0,0,16" />
+                        <StackPanel x:Name="GamingList" />
                     </StackPanel>
                 </ScrollViewer>
 
