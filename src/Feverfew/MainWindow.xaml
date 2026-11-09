@@ -1,0 +1,162 @@
+<Window x:Class="Feverfew.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Feverfew" Width="980" Height="680" MinWidth="780" MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        Icon="pack://application:,,,/Feverfew;component/feverfew.ico"
+        Background="#FF202020"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14"
+        Foreground="White"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <ResourceDictionary Source="Theme.xaml" />
+    </Window.Resources>
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40" GlassFrameThickness="-1" ResizeBorderThickness="6" CornerRadius="0" UseAeroCaptionButtons="True" />
+    </WindowChrome.WindowChrome>
+
+    <Grid x:Name="Root">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="40" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
+            <Image Source="pack://application:,,,/Feverfew;component/feverfew.ico" Width="18" Height="18" />
+            <TextBlock Text="Feverfew" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center" />
+            <TextBlock x:Name="TitleVersion" FontSize="12" Opacity="0.6" Margin="8,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Margin="8,4,8,12">
+                <Border DockPanel.Dock="Bottom" Style="{StaticResource Card}" Padding="14,12">
+                    <StackPanel>
+                        <TextBlock Text="Access" Style="{StaticResource Caption}" />
+                        <TextBlock x:Name="AccessText" FontSize="18" FontWeight="SemiBold" Margin="0,2,0,0" />
+                        <TextBlock x:Name="AccessDetail" Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                    </StackPanel>
+                </Border>
+                <StackPanel>
+                    <RadioButton x:Name="NavScan" Style="{StaticResource NavItem}" Content="Diagnostics" Tag="&#xE9D9;" IsChecked="True" Checked="Nav_Checked" />
+                    <RadioButton x:Name="NavRepair" Style="{StaticResource NavItem}" Content="Repair tools" Tag="&#xE90F;" Checked="Nav_Checked" />
+                    <RadioButton x:Name="NavUpdates" Style="{StaticResource NavItem}" Content="Updates and about" Tag="&#xE895;" Checked="Nav_Checked" />
+                </StackPanel>
+            </DockPanel>
+
+            <Grid Grid.Column="1">
+                <ScrollViewer x:Name="ScanPage" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="28,12,32,32" MaxWidth="1000">
+                        <TextBlock Text="Diagnostics" Style="{StaticResource PageTitle}" />
+                        <TextBlock Text="Checks this PC's hardware, firmware, drivers and recent crashes, then saves a report you can send to whoever is helping you. Nothing is uploaded." Style="{StaticResource Secondary}" Margin="0,0,0,16" />
+
+                        <Border x:Name="LimitedBar" Visibility="Collapsed" Background="{StaticResource InfoFill}" CornerRadius="8" Padding="16,12" Margin="0,0,0,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock Text="Running without administrator rights" FontWeight="SemiBold" />
+                                    <TextBlock Text="TPM, BitLocker, Secure Boot keys, drive health and crash dumps will be skipped." Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Restart as administrator" Click="RestartElevated_Click" />
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,16,0">
+                                        <TextBlock Text="Scan this PC" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Text="Usually takes under a minute. Nothing on the PC is changed." Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <Button x:Name="RunButton" Grid.Column="1" Content="Run diagnostics" Style="{StaticResource AccentButton}" Click="Run_Click" />
+                                </Grid>
+                                <CheckBox x:Name="Identifiers" Content="Include serial numbers and names (useful for warranty claims)" Margin="0,14,0,0" />
+                                <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,14,0,0">
+                                    <ProgressBar x:Name="Progress" Minimum="0" Maximum="100" />
+                                    <TextBlock x:Name="StatusText" Style="{StaticResource Caption}" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel x:Name="ResultsPanel" Visibility="Collapsed">
+                            <UniformGrid Rows="1" Margin="-6,14,-6,0">
+                                <Border Style="{StaticResource Card}" Margin="6,0"><StackPanel><TextBlock Text="Critical" Style="{StaticResource Caption}" /><TextBlock x:Name="CriticalCount" Style="{StaticResource StatNumber}" Foreground="{StaticResource CriticalText}" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="6,0"><StackPanel><TextBlock Text="Warnings" Style="{StaticResource Caption}" /><TextBlock x:Name="WarningCount" Style="{StaticResource StatNumber}" Foreground="{StaticResource WarningText}" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="6,0"><StackPanel><TextBlock Text="Notes" Style="{StaticResource Caption}" /><TextBlock x:Name="InfoCount" Style="{StaticResource StatNumber}" Foreground="{StaticResource InfoText}" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="6,0"><StackPanel><TextBlock Text="Scan" Style="{StaticResource Caption}" /><TextBlock x:Name="ScanKind" Style="{StaticResource StatNumber}" Foreground="{StaticResource Accent}" /></StackPanel></Border>
+                            </UniformGrid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <Button Content="Open report" Style="{StaticResource AccentButton}" Click="OpenReport_Click" />
+                                <Button Content="Show file to send" Margin="8,0,0,0" Click="ShowFile_Click" />
+                            </StackPanel>
+
+                            <TextBlock Text="Findings" Style="{StaticResource SectionTitle}" />
+                            <StackPanel x:Name="FindingsList" />
+
+                            <TextBlock Text="At a glance" Style="{StaticResource SectionTitle}" />
+                            <Border Style="{StaticResource Card}">
+                                <Grid x:Name="GlanceGrid">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="RepairPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                    <StackPanel Margin="28,12,32,32" MaxWidth="1000">
+                        <TextBlock Text="Repair tools" Style="{StaticResource PageTitle}" />
+                        <TextBlock x:Name="RepairStatus" Text="Each fix opens in its own administrator window so you can watch it and read the result. Nothing runs until you press Run." Style="{StaticResource Secondary}" Margin="0,0,0,16" />
+                        <StackPanel x:Name="RepairList" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="UpdatesPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+                    <StackPanel Margin="28,12,32,32" MaxWidth="1000">
+                        <TextBlock Text="Updates and about" Style="{StaticResource PageTitle}" />
+                        <TextBlock Text="Feverfew only contacts GitHub when you press Check for updates." Style="{StaticResource Secondary}" Margin="0,0,0,16" />
+                        <Border Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock x:Name="VersionText" Style="{StaticResource CardTitle}" />
+                                    <TextBlock x:Name="UpdateStatus" Text="Updates come from this project's GitHub releases." Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button x:Name="UpdateButton" Grid.Column="1" Content="Check for updates" Style="{StaticResource AccentButton}" Click="CheckUpdates_Click" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock Text="Created by TessArdent" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Text="Open source and free to use and change under the MIT License." Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="View on GitHub" Click="Repository_Click" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <Grid x:Name="DialogLayer" Grid.RowSpan="2" Visibility="Collapsed" Background="{StaticResource Scrim}">
+            <Border Background="{StaticResource DialogFill}" BorderBrush="{StaticResource CardStroke}" BorderThickness="1" CornerRadius="8" Padding="24,20" Width="440" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock x:Name="DialogTitle" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock x:Name="DialogText" TextWrapping="Wrap" Margin="0,10,0,20" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="DialogYes" Style="{StaticResource AccentButton}" Click="DialogYes_Click" />
+                        <Button Content="Cancel" Margin="8,0,0,0" IsCancel="True" Click="DialogNo_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
