@@ -12,6 +12,8 @@ namespace Feverfew
         public string Caution;
         /// <summary>Command that reverses this one, for fixes that offer an Undo button.</summary>
         public string Undo;
+        /// <summary>Reads this PC's current state as one short line, for the Gaming page.</summary>
+        public System.Func<string> Status;
     }
 
     public static class Fixes
@@ -51,23 +53,27 @@ namespace Feverfew
         private const string GraphicsDrivers = @"HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers";
         private const string SystemProfile = @"""HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile""";
         private const string GpuRestart = "You must restart for this to take effect.";
+        private const string AdapterRestart = "The network adapter restarts, so the connection drops for a few seconds.";
+        private const string EnergyEfficientEthernet = "powershell -NoProfile -Command \"Get-NetAdapterAdvancedProperty -AllProperties -RegistryKeyword '*EEE' -ErrorAction SilentlyContinue | Set-NetAdapterAdvancedProperty -RegistryValue ";
 
         public static readonly Fix[] Gaming =
         {
             new Fix { Name = "Use the High performance power plan", When = "The CPU is slow to ramp up in games. Uses more power and makes laptops run hotter. Undo returns to Balanced.",
-                Command = "powercfg /setactive SCHEME_MIN", Undo = "powercfg /setactive SCHEME_BALANCED" },
+                Command = "powercfg /setactive SCHEME_MIN", Undo = "powercfg /setactive SCHEME_BALANCED", Status = Collectors.GamingCollector.PowerStatus },
             new Fix { Name = "Turn on Game Mode", When = "The scan reports that Game Mode is off. Undo turns it off.",
                 Command = "reg add " + GameBar + " /v AutoGameModeEnabled /t REG_DWORD /d 1 /f & reg add " + GameBar + " /v AllowAutoGameMode /t REG_DWORD /d 1 /f",
-                Undo = "reg add " + GameBar + " /v AutoGameModeEnabled /t REG_DWORD /d 0 /f" },
+                Undo = "reg add " + GameBar + " /v AutoGameModeEnabled /t REG_DWORD /d 0 /f", Status = Collectors.GamingCollector.GameModeStatus },
             new Fix { Name = "Turn off background recording", When = "You don't use Game Bar to save the last moments of play. Undo turns it back on.",
                 Command = "reg add " + GameDvr + " /v HistoricalCaptureEnabled /t REG_DWORD /d 0 /f",
-                Undo = "reg add " + GameDvr + " /v HistoricalCaptureEnabled /t REG_DWORD /d 1 /f" },
+                Undo = "reg add " + GameDvr + " /v HistoricalCaptureEnabled /t REG_DWORD /d 1 /f", Status = Collectors.GamingCollector.RecordingStatus },
             new Fix { Name = "Turn on hardware-accelerated GPU scheduling", When = "Needed for DLSS Frame Generation and helpful on some recent cards. Needs a supported card and driver. Undo turns it off.",
-                Command = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 2 /f", Undo = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 1 /f", Caution = GpuRestart },
+                Command = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 2 /f", Undo = "reg add " + GraphicsDrivers + " /v HwSchMode /t REG_DWORD /d 1 /f", Caution = GpuRestart, Status = Collectors.GamingCollector.SchedulingStatus },
+            new Fix { Name = "Turn off Energy Efficient Ethernet", When = "Wired connections with small, irregular delays. Changes every adapter that supports it. Undo turns it back on.",
+                Command = EnergyEfficientEthernet + "0\"", Undo = EnergyEfficientEthernet + "1\"", Caution = AdapterRestart, Status = Collectors.GamingCollector.EnergyEfficientEthernetStatus },
             new Fix { Name = "Restore default TCP settings", When = "The scan reports changed TCP settings, or a tweak tool has been used. Sets auto-tuning to normal, receive side scaling on and heuristics off.",
-                Command = "netsh int tcp set global autotuninglevel=normal & netsh int tcp set global rss=enabled & netsh int tcp set heuristics disabled" },
+                Command = "netsh int tcp set global autotuninglevel=normal & netsh int tcp set global rss=enabled & netsh int tcp set heuristics disabled", Status = Collectors.GamingCollector.TcpStatus },
             new Fix { Name = "Restore default multimedia settings", When = "The scan reports changed network throttling or system responsiveness values.",
-                Command = "reg add " + SystemProfile + " /v NetworkThrottlingIndex /t REG_DWORD /d 10 /f & reg add " + SystemProfile + " /v SystemResponsiveness /t REG_DWORD /d 20 /f" }
+                Command = "reg add " + SystemProfile + " /v NetworkThrottlingIndex /t REG_DWORD /d 10 /f & reg add " + SystemProfile + " /v SystemResponsiveness /t REG_DWORD /d 20 /f", Status = Collectors.GamingCollector.MultimediaStatus }
         };
 
         public static void AddToReport(Report r)

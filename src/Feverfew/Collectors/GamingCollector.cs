@@ -216,6 +216,14 @@ namespace Feverfew.Collectors
             if (gpus.Any(g => Is(g, "AMD") || Is(g, "Radeon"))) Guard.Try(s, "AMD details", () => Amd(s));
             if (!gpus.Any(g => Is(g, "NVIDIA") || Is(g, "AMD") || Is(g, "Radeon")))
                 s.Note("No NVIDIA or AMD graphics card was found.");
+
+            Guard.Try(s, "Suggested graphics settings", () =>
+            {
+                var tips = TipsForThisPc();
+                if (tips.Count == 0) return;
+                var t = s.Table("Suggested settings to check in the graphics app", "Setting", "Suggestion");
+                foreach (var tip in tips) t.Rows.Add(new[] { tip.Name, tip.Text });
+            });
         }
 
         private static void Nvidia(Report r, Section s)
@@ -247,6 +255,22 @@ namespace Feverfew.Collectors
                     r.Find(Severity.Info, "Gaming: Resizable BAR appears to be off", c[0] + " exposes " + bar + " MiB through its BAR.", "If the card and board support it, turn on Above 4G Decoding and Resizable BAR in BIOS setup. It requires UEFI boot.");
             }
             if (t.Rows.Count == 0) s.Tables.Remove(t);
+
+            // Separate query: a field an older driver doesn't know would fail the whole table above.
+            const string limits = "name,power.default_limit,power.limit,clocks_throttle_reasons.hw_thermal_slowdown,clocks_throttle_reasons.sw_thermal_slowdown,clocks_throttle_reasons.hw_power_brake_slowdown";
+            foreach (var line in Lines(RunTool(tool, "--query-gpu=" + limits + " --format=csv,noheader,nounits")))
+            {
+                var c = line.Split(',').Select(x => x.Trim()).ToArray();
+                if (c.Length < 6) continue;
+                double standard, limit;
+                if (double.TryParse(c[1], NumberStyles.Float, CultureInfo.InvariantCulture, out standard) && double.TryParse(c[2], NumberStyles.Float, CultureInfo.InvariantCulture, out limit) && limit < standard - 1)
+                    r.Find(Severity.Info, "Gaming: Graphics card power limit is below its default", c[0] + " is limited to " + Fmt.Num(limit, "0") + " W, and its default is " + Fmt.Num(standard, "0") + " W.", "If you didn't lower it, check overclocking tools such as MSI Afterburner.");
+                if (c[3] == "Active" || c[4] == "Active")
+                    r.Find(Severity.Warning, "Gaming: Graphics card is slowing down from heat", c[0] + " was thermally throttling during the scan.", "Clean the dust out, check that its fans spin, and improve case airflow.");
+                if (c[5] == "Active")
+                    r.Find(Severity.Warning, "Gaming: Graphics card is slowing down from a power limit signal", c[0] + " reported a hardware power brake during the scan.", "Check that every power connector is fully seated, and that the power supply is adequate.");
+            }
+
             s.Note("The PCIe generation drops when the card is idle, so a lower 'now' generation is normal during a scan. Per-game NVIDIA settings can't be read here.");
         }
 
@@ -280,6 +304,80 @@ namespace Feverfew.Collectors
         {
             var g = n.GetIPProperties().GatewayAddresses.Select(x => x.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && !a.Equals(System.Net.IPAddress.Any));
             return g == null ? null : g.ToString();
+        }
+
+        public sealed class GraphicsTip
+        {
+            public string Vendor, Name, Text;
+        }
+
+        // These live in the vendors' own apps, which offer no simple supported command to change them.
+        private static readonly GraphicsTip[] Tips =
+        {
+            new GraphicsTip { Vendor = "NVIDIA", Name = "NVIDIA Reflex", Text = "Turn it on in games that offer it. It's the most effective way to lower input lag on NVIDIA cards." },
+            new GraphicsTip { Vendor = "NVIDIA", Name = "Low Latency Mode", Text = "For games without Reflex, set it to On in NVIDIA Control Panel, under Manage 3D settings." },
+            new GraphicsTip { Vendor = "NVIDIA", Name = "G-SYNC", Text = "Turn it on for a compatible display, and keep the frame rate a few frames below the refresh rate." },
+            new GraphicsTip { Vendor = "NVIDIA", Name = "Power management mode", Text = "Leave it on Normal globally. Use Prefer maximum performance only for a game with unstable clocks, because it raises power use." },
+            new GraphicsTip { Vendor = "AMD", Name = "Radeon Anti-Lag", Text = "Turn it on in AMD Software, under Gaming and then Graphics, to lower input lag." },
+            new GraphicsTip { Vendor = "AMD", Name = "FreeSync", Text = "Turn it on in both AMD Software and the monitor's own menu." },
+            new GraphicsTip { Vendor = "AMD", Name = "Smart Access Memory", Text = "Needs Resizable BAR to be on in BIOS setup, and can then be checked in AMD Software." },
+            new GraphicsTip { Vendor = "AMD", Name = "Radeon Chill", Text = "Leave it off for the highest frame rates. It's meant for saving power and heat." }
+        };
+
+        public static List<GraphicsTip> TipsForThisPc()
+        {
+            var gpus = Wmi.Cim("SELECT Name FROM Win32_VideoController");
+            return Tips.Where(t => gpus.Any(g => Is(g, t.Vendor) || (t.Vendor == "AMD" && Is(g, "Radeon")))).ToList();
+        }
+
+        // Status lines for the Gaming page. "Already set" means pressing Apply would change nothing useful.
+        public static string PowerStatus()
+        {
+            var plan = ActivePowerPlan();
+            return plan == "High performance" || plan == "Ultimate Performance" ? "Already set: " + plan : "Optional: currently " + plan;
+        }
+
+        public static string GameModeStatus()
+        {
+            var v = Reg.Get(RegistryHive.CurrentUser, @"Software\Microsoft\GameBar", "AutoGameModeEnabled");
+            return v == null || Convert.ToInt32(v) != 0 ? "Already set: Game Mode is on" : "Worth applying: Game Mode is off";
+        }
+
+        public static string RecordingStatus()
+        {
+            var v = Reg.Get(RegistryHive.CurrentUser, @"Software\Microsoft\Windows\CurrentVersion\GameDVR", "HistoricalCaptureEnabled");
+            return v == null || Convert.ToInt32(v) == 0 ? "Already set: background recording is off" : "Worth applying if you don't use it: background recording is on";
+        }
+
+        public static string SchedulingStatus()
+        {
+            var v = Reg.Machine(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", "HwSchMode");
+            if (v == null) return "Optional: using the driver's default";
+            return Convert.ToInt32(v) == 2 ? "Already set: on" : "Optional: currently off";
+        }
+
+        public static string TcpStatus()
+        {
+            var tcp = Wmi.Query(NetworkNamespace, "SELECT * FROM MSFT_NetTCPSetting").First(x => x.Str("SettingName") == "Internet");
+            var offload = Wmi.Query(NetworkNamespace, "SELECT ReceiveSideScaling FROM MSFT_NetOffloadGlobalSetting").First();
+            bool defaults = tcp.Long("AutoTuningLevelLocal") == TcpAutoTuningNormal && tcp.Long("ScalingHeuristics") == 0 && offload.Long("ReceiveSideScaling") == 1;
+            return defaults ? "Already set: TCP settings are at their defaults" : "Worth applying: TCP settings have been changed";
+        }
+
+        public static string MultimediaStatus()
+        {
+            var throttle = Reg.Machine(SystemProfile, "NetworkThrottlingIndex");
+            var responsive = Reg.Machine(SystemProfile, "SystemResponsiveness");
+            bool defaults = (throttle == null || Unsigned(throttle) == DefaultNetworkThrottling) && (responsive == null || Unsigned(responsive) == DefaultSystemResponsiveness);
+            return defaults ? "Already set: these are at their defaults" : "Worth applying: these have been changed";
+        }
+
+        public static string EnergyEfficientEthernetStatus()
+        {
+            var values = Wmi.Query(NetworkNamespace, "SELECT * FROM MSFT_NetAdapterAdvancedPropertySettingData")
+                .Where(x => x.Str("RegistryKeyword").Equals("*EEE", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (values.Count == 0) return "Not available on this PC's adapters";
+            return values.All(x => x.Str("RegistryValue") == "0") ? "Already set: it's off" : "Optional: it's on";
         }
 
         private static string ActivePowerPlan()

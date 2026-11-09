@@ -25,6 +25,8 @@ namespace Feverfew
         private readonly bool limited;
         private ScanResult result;
         private TaskCompletionSource<bool> question;
+        private readonly System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<Fix, TextBlock>> statusLines = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<Fix, TextBlock>>();
+        private bool tipsLoaded;
 
         public MainWindow(ScanOptions options, bool limited)
         {
@@ -69,6 +71,38 @@ namespace Feverfew
             RepairPage.Visibility = sender == NavRepair ? Visibility.Visible : Visibility.Collapsed;
             GamingPage.Visibility = sender == NavGaming ? Visibility.Visible : Visibility.Collapsed;
             UpdatesPage.Visibility = sender == NavUpdates ? Visibility.Visible : Visibility.Collapsed;
+            if (sender == NavGaming) RefreshGamingPage();
+        }
+
+        // Re-read on every visit, so a change made in an administrator window shows when the user comes back.
+        private async void RefreshGamingPage()
+        {
+            foreach (var pair in statusLines)
+            {
+                var fix = pair.Key;
+                var line = pair.Value;
+                line.Text = await Task.Run(() =>
+                {
+                    try { return fix.Status(); }
+                    catch (Exception) { return "Couldn't read the current setting"; }
+                });
+            }
+
+            if (tipsLoaded) return;
+            tipsLoaded = true;
+            try
+            {
+                var tips = await Task.Run(() => Collectors.GamingCollector.TipsForThisPc());
+                foreach (var tip in tips)
+                {
+                    var text = new StackPanel();
+                    text.Children.Add(new TextBlock { Text = tip.Name, Style = (Style)FindResource("CardTitle") });
+                    text.Children.Add(new TextBlock { Text = tip.Text, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 0) });
+                    GraphicsTipsList.Children.Add(new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = text });
+                }
+                GraphicsTipsPanel.Visibility = tips.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            catch (Exception) { /* the tips are optional, so the page works without them */ }
         }
 
         private void RestartElevated_Click(object sender, RoutedEventArgs e)
@@ -185,6 +219,12 @@ namespace Feverfew
             var text = new StackPanel { Margin = new Thickness(0, 0, 16, 0) };
             text.Children.Add(new TextBlock { Text = fix.Name, Style = (Style)FindResource("CardTitle") });
             text.Children.Add(new TextBlock { Text = fix.When, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 0) });
+            if (fix.Status != null)
+            {
+                var line = new TextBlock { Text = "Checking...", Style = (Style)FindResource("Caption"), Foreground = (Brush)FindResource("Accent"), Margin = new Thickness(0, 4, 0, 0) };
+                text.Children.Add(line);
+                statusLines.Add(new System.Collections.Generic.KeyValuePair<Fix, TextBlock>(fix, line));
+            }
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             if (fix.Undo != null) buttons.Children.Add(BuildCommandButton(fix, fix.Undo, "Undo", status));
