@@ -121,9 +121,14 @@
                 <ScrollViewer x:Name="GamingPage" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
                     <StackPanel Margin="28,12,32,32" MaxWidth="1000">
                         <TextBlock Text="Gaming" Style="{StaticResource PageTitle}" />
-                        <TextBlock x:Name="GamingStatus" Text="Run diagnostics to see what's worth changing on this PC. Results vary by game and hardware. Each option opens in its own administrator window, and nothing runs until you press Apply." Style="{StaticResource Secondary}" Margin="0,0,0,8" />
+                        <TextBlock x:Name="GamingStatus" Text="Each option shows whether it's worth changing on this PC. Results vary by game and hardware. Each option opens in its own administrator window, and nothing runs until you press Apply." Style="{StaticResource Secondary}" Margin="0,0,0,8" />
                         <TextBlock Text="Game Mode and recording apply to the account that approves the Windows permission prompt." Style="{StaticResource Caption}" Margin="0,0,0,16" />
                         <StackPanel x:Name="GamingList" />
+                        <StackPanel x:Name="GraphicsTipsPanel" Visibility="Collapsed">
+                            <TextBlock Text="Settings to check in your graphics app" Style="{StaticResource SectionTitle}" />
+                            <TextBlock Text="These can't be changed safely from here. Open NVIDIA App, NVIDIA Control Panel or AMD Software to change them." Style="{StaticResource Caption}" Margin="0,0,0,10" />
+                            <StackPanel x:Name="GraphicsTipsList" />
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
 
