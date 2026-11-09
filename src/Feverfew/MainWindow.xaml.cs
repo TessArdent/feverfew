@@ -201,13 +201,18 @@ namespace Feverfew
             return new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = grid };
         }
 
-        private Button BuildCommandButton(Fix fix, string command, string label, TextBlock status)
+        private Button BuildCommandButton(Fix fix, bool undo, string label, TextBlock status)
         {
             var button = new Button { Content = label, MinWidth = 72, Margin = new Thickness(8, 0, 0, 0) };
             button.Click += async (s, e) =>
             {
                 if (fix.Caution != null && !await Ask(fix.Name, fix.Caution, label)) return;
-                status.Text = Fixes.Run(command)
+                // Read before the command runs, or Undo would return to the changed setting.
+                var previous = undo ? null : Fixes.CaptureState(fix);
+                bool started = Fixes.Run(undo ? Fixes.UndoCommand(fix) : fix.Command);
+                if (started && undo) Fixes.ForgetState(fix);
+                else if (started) Fixes.RememberState(fix, previous);
+                status.Text = started
                     ? "Started: " + fix.Name + ". Read the result in its window, then close it."
                     : "Not started, because the Windows permission prompt was declined.";
             };
@@ -227,8 +232,8 @@ namespace Feverfew
             }
 
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            if (fix.Undo != null) buttons.Children.Add(BuildCommandButton(fix, fix.Undo, "Undo", status));
-            buttons.Children.Add(BuildCommandButton(fix, fix.Command, runLabel, status));
+            if (fix.Undo != null) buttons.Children.Add(BuildCommandButton(fix, true, "Undo", status));
+            buttons.Children.Add(BuildCommandButton(fix, false, runLabel, status));
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition());

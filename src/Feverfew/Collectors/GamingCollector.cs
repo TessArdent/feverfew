@@ -382,19 +382,23 @@ namespace Feverfew.Collectors
 
         private static string ActivePowerPlan()
         {
-            IntPtr pointer;
-            if (PowerGetActiveScheme(IntPtr.Zero, out pointer) != 0) return "";
-            try
+            var scheme = ActivePowerSchemeGuid();
+            if (scheme == null) return "";
+            switch (scheme)
             {
-                switch (((Guid)Marshal.PtrToStructure(pointer, typeof(Guid))).ToString())
-                {
-                    case "381b4222-f694-41f0-9685-ff5bb260df2e": return "Balanced";
-                    case "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": return "High performance";
-                    case "e9a42b02-d5df-448d-aa00-03f14749eb61": return "Ultimate Performance";
-                    case "a1841308-3541-4fab-bc81-f71556f20b4a": return "Power saver";
-                    default: return "Custom";
-                }
+                case "381b4222-f694-41f0-9685-ff5bb260df2e": return "Balanced";
+                case "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c": return "High performance";
+                case "e9a42b02-d5df-448d-aa00-03f14749eb61": return "Ultimate Performance";
+                case "a1841308-3541-4fab-bc81-f71556f20b4a": return "Power saver";
+                default: return "Custom";
             }
+        }
+
+        public static string ActivePowerSchemeGuid()
+        {
+            IntPtr pointer;
+            if (PowerGetActiveScheme(IntPtr.Zero, out pointer) != 0) return null;
+            try { return ((Guid)Marshal.PtrToStructure(pointer, typeof(Guid))).ToString(); }
             finally { LocalFree(pointer); }
         }
 

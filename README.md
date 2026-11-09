@@ -58,7 +58,7 @@ The report comes as an `.html` file to read and a `.json` file with the same con
 
 ## Gaming
 
-**Gaming** lists optional changes and shows whether each is worth applying on this PC. Each one runs in its own administrator window, only when you press **Apply**, and most have an **Undo**. The page also suggests settings to check in NVIDIA or AMD's own app, because Feverfew can't safely change those. Feverfew leaves out popular tweaks with no reliable benefit, and doesn't offer to turn off security features such as memory integrity.
+**Gaming** lists optional changes and shows whether each is worth applying on this PC. Each one runs in its own administrator window, only when you press **Apply**, and most have an **Undo** that returns to the setting you had before. The page also suggests settings to check in NVIDIA or AMD's own app, because Feverfew can't safely change those. Feverfew leaves out popular tweaks with no reliable benefit, and doesn't offer to turn off security features such as memory integrity.
 
 | Option | Command |
 | --- | --- |
