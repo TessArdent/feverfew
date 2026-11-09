@@ -19,15 +19,16 @@ Reports are saved in `Feverfew Reports` on the Desktop.
 | Area | Details |
 | --- | --- |
 | Motherboard and BIOS | Maker, model, revision, BIOS version and date, UEFI or Legacy boot, Secure Boot |
-| Boot and Secure Boot | Setup Mode, platform key, allowed and revoked signature counts, trusted certificates, firmware boot entries, EFI boot loaders and who signed them |
+| Boot and Secure Boot | Setup Mode, platform key, allowed and revoked signature counts, trusted certificates, the BIOS's default keys, Windows' Secure Boot certificate update status, firmware boot entries, EFI boot loaders and who signed them, and whether the firmware trusts the Windows boot file |
 | TPM and security | TPM version, maker and state, BitLocker on or off, virtualization-based security, antivirus, firewall |
-| Processor and memory | CPU model, cores, speeds, each RAM module, rated and actual speed, slots used |
+| Processor and memory | CPU model, cores, speeds, each RAM module, rated speed (from the part number when Windows reports only the fallback speed), actual speed, slots used |
 | Graphics and devices | GPU and driver details, monitors, sound, USB devices, devices with errors, third-party drivers |
 | Storage | Drive type and health, SMART failure prediction, temperature, wear, power-on hours, GPT or MBR for each disk, every partition (including EFI and recovery), unallocated space, fixed and removable volumes, free space |
 | Windows | Edition, build, activation, uptime, pending restarts, recent updates, power settings |
 | Software | Installed programs, startup programs, stopped services, top memory use |
-| Crashes | Blue screen stop codes, unexpected restarts, hardware (WHEA) errors, disk errors, program crashes, last 30 days of event log errors |
+| Crashes | Blue screen stop codes, repeated stop codes, the time of each unexpected shutdown, drivers logging large numbers of errors, hardware (WHEA) errors, disk errors, program crashes, last 30 days of event log errors |
 | Network | Adapters, addresses, DNS, proxy, router, internet and name lookup tests |
+| Gaming | Power plan, Game Mode, background recording, GPU scheduling, memory integrity, connection type, latency, jitter and packet loss, TCP and network adapter settings, NVIDIA power, PCIe and Resizable BAR details, AMD driver details, refresh rate |
 | Battery | Charge, wear, cycles (laptops) |
 | Windows 11 | Readiness for each hardware requirement, except Microsoft's supported CPU list |
 
@@ -35,7 +36,7 @@ The report comes as an `.html` file to read and a `.json` file with the same con
 
 ## Privacy
 
-- **Nothing is uploaded.** Feverfew has no telemetry. A scan's only network traffic is the connection test: a ping to the router, a ping to `1.1.1.1`, and a name lookup for `www.microsoft.com`. Use `--no-network` to skip it. **Check for updates** contacts GitHub only when you press it, and sends no report data.
+- **Nothing is uploaded.** Feverfew has no telemetry. A scan's only network traffic is the connection tests: pings to the router and to `1.1.1.1` (about 20 each, to measure latency), and a name lookup for `www.microsoft.com`. Use `--no-network` to skip it. **Check for updates** contacts GitHub only when you press it, and sends no report data.
 - **Identifiers are hidden by default.** Serial numbers, the system UUID, computer and user names, drive labels, MAC addresses, public IP addresses, and email addresses in log messages become `[hidden]`. Tick the checkbox to keep them, for example for a warranty claim.
 - **Feverfew never reads** product keys, BitLocker recovery keys, passwords, browser data or personal files.
 - **Reports still say a lot about a PC.** The installed programs list, for one, is included even with identifiers hidden. Only send a report to someone you trust, and glance through it first if that matters to you.
@@ -54,6 +55,18 @@ The report comes as an `.html` file to read and a `.json` file with the same con
 | Clear the DNS cache | `ipconfig /flushdns` |
 | Reset network settings | `netsh winsock reset`, `netsh int ip reset` |
 | Reset Windows Update | Stops its services and renames its cache folders |
+
+## Gaming
+
+**Gaming** lists optional changes and shows whether each is worth applying on this PC. Each one runs in its own administrator window, only when you press **Apply**, and most have an **Undo** that returns to the setting you had before. The page also suggests settings to check in NVIDIA or AMD's own app, because Feverfew can't safely change those. Feverfew leaves out popular tweaks with no reliable benefit, and doesn't offer to turn off security features such as memory integrity.
+
+| Option | Command |
+| --- | --- |
+| High performance power plan | `powercfg /setactive SCHEME_MIN` |
+| Game Mode, background recording, GPU scheduling | `reg add` on the matching Windows setting |
+| Turn off Energy Efficient Ethernet | `Set-NetAdapterAdvancedProperty` on `*EEE` |
+| Restore default TCP settings | `netsh int tcp set global autotuninglevel=normal`, `rss=enabled`, `netsh int tcp set heuristics disabled` |
+| Restore default multimedia settings | `reg add` on `NetworkThrottlingIndex` and `SystemResponsiveness` |
 
 ## Updates
 

@@ -25,6 +25,8 @@ namespace Feverfew
         private readonly bool limited;
         private ScanResult result;
         private TaskCompletionSource<bool> question;
+        private readonly System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<Fix, TextBlock>> statusLines = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<Fix, TextBlock>>();
+        private bool tipsLoaded;
 
         public MainWindow(ScanOptions options, bool limited)
         {
@@ -41,7 +43,8 @@ namespace Feverfew
             AccessDetail.Text = limited ? "Some checks will be skipped" : "Full scan available";
             LimitedBar.Visibility = limited ? Visibility.Visible : Visibility.Collapsed;
 
-            foreach (var fix in Fixes.All) RepairList.Children.Add(BuildFixRow(fix));
+            foreach (var fix in Fixes.All) RepairList.Children.Add(BuildFixRow(fix, RepairStatus, "Run"));
+            foreach (var fix in Fixes.Gaming) GamingList.Children.Add(BuildFixRow(fix, GamingStatus, "Apply"));
             SourceInitialized += (s, e) => ApplyBackdrop();
             StateChanged += (s, e) => Root.Margin = new Thickness(WindowState == WindowState.Maximized ? MaximizedInset : 0);
             Closed += (s, e) => Environment.Exit(0); // an abandoned scan step may still be running on a background thread
@@ -66,7 +69,40 @@ namespace Feverfew
             if (ScanPage == null) return; // fires during startup, before the pages exist
             ScanPage.Visibility = sender == NavScan ? Visibility.Visible : Visibility.Collapsed;
             RepairPage.Visibility = sender == NavRepair ? Visibility.Visible : Visibility.Collapsed;
+            GamingPage.Visibility = sender == NavGaming ? Visibility.Visible : Visibility.Collapsed;
             UpdatesPage.Visibility = sender == NavUpdates ? Visibility.Visible : Visibility.Collapsed;
+            if (sender == NavGaming) RefreshGamingPage();
+        }
+
+        // Re-read on every visit, so a change made in an administrator window shows when the user comes back.
+        private async void RefreshGamingPage()
+        {
+            foreach (var pair in statusLines)
+            {
+                var fix = pair.Key;
+                var line = pair.Value;
+                line.Text = await Task.Run(() =>
+                {
+                    try { return fix.Status(); }
+                    catch (Exception) { return "Couldn't read the current setting"; }
+                });
+            }
+
+            if (tipsLoaded) return;
+            tipsLoaded = true;
+            try
+            {
+                var tips = await Task.Run(() => Collectors.GamingCollector.TipsForThisPc());
+                foreach (var tip in tips)
+                {
+                    var text = new StackPanel();
+                    text.Children.Add(new TextBlock { Text = tip.Name, Style = (Style)FindResource("CardTitle") });
+                    text.Children.Add(new TextBlock { Text = tip.Text, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 0) });
+                    GraphicsTipsList.Children.Add(new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = text });
+                }
+                GraphicsTipsPanel.Visibility = tips.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            catch (Exception) { /* the tips are optional, so the page works without them */ }
         }
 
         private void RestartElevated_Click(object sender, RoutedEventArgs e)
@@ -165,26 +201,45 @@ namespace Feverfew
             return new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = grid };
         }
 
-        private Border BuildFixRow(Fix fix)
+        private Button BuildCommandButton(Fix fix, bool undo, string label, TextBlock status)
+        {
+            var button = new Button { Content = label, MinWidth = 72, Margin = new Thickness(8, 0, 0, 0) };
+            button.Click += async (s, e) =>
+            {
+                if (fix.Caution != null && !await Ask(fix.Name, fix.Caution, label)) return;
+                // Read before the command runs, or Undo would return to the changed setting.
+                var previous = undo ? null : Fixes.CaptureState(fix);
+                bool started = Fixes.Run(undo ? Fixes.UndoCommand(fix) : fix.Command);
+                if (started && undo) Fixes.ForgetState(fix);
+                else if (started) Fixes.RememberState(fix, previous);
+                status.Text = started
+                    ? "Started: " + fix.Name + ". Read the result in its window, then close it."
+                    : "Not started, because the Windows permission prompt was declined.";
+            };
+            return button;
+        }
+
+        private Border BuildFixRow(Fix fix, TextBlock status, string runLabel)
         {
             var text = new StackPanel { Margin = new Thickness(0, 0, 16, 0) };
             text.Children.Add(new TextBlock { Text = fix.Name, Style = (Style)FindResource("CardTitle") });
             text.Children.Add(new TextBlock { Text = fix.When, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 0) });
-
-            var run = new Button { Content = "Run", MinWidth = 72 };
-            run.Click += async (s, e) =>
+            if (fix.Status != null)
             {
-                if (fix.Caution != null && !await Ask(fix.Name, fix.Caution, "Run fix")) return;
-                RepairStatus.Text = Fixes.Run(fix)
-                    ? "Started: " + fix.Name + ". Read the result in its window, then close it."
-                    : "Not started, because the Windows permission prompt was declined.";
-            };
+                var line = new TextBlock { Text = "Checking...", Style = (Style)FindResource("Caption"), Foreground = (Brush)FindResource("Accent"), Margin = new Thickness(0, 4, 0, 0) };
+                text.Children.Add(line);
+                statusLines.Add(new System.Collections.Generic.KeyValuePair<Fix, TextBlock>(fix, line));
+            }
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            if (fix.Undo != null) buttons.Children.Add(BuildCommandButton(fix, true, "Undo", status));
+            buttons.Children.Add(BuildCommandButton(fix, false, runLabel, status));
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             AddToGrid(grid, text, 0, 0);
-            AddToGrid(grid, run, 0, 1);
+            AddToGrid(grid, buttons, 0, 1);
             return new Border { Style = (Style)FindResource("Card"), Margin = new Thickness(0, 0, 0, 8), Child = grid };
         }
 

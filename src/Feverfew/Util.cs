@@ -138,6 +138,7 @@ namespace Feverfew
 
         public static string Date(DateTime? d) { return d == null ? "Unknown" : d.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
         public static string Time(DateTime? d) { return d == null ? "Unknown" : d.Value.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture); }
+        public static string Seconds(DateTime? d) { return d == null ? "Unknown" : d.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture); }
         public static string YesNo(bool? b) { return b == null ? "Unknown" : b.Value ? "Yes" : "No"; }
         public static string Num(double v, string format = "0.#") { return v.ToString(format, CultureInfo.InvariantCulture); }
 
